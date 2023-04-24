@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use cfg_if::cfg_if;
 cfg_if! {
     if #[cfg(feature = "server")] {
@@ -12,14 +10,37 @@ cfg_if! {
         async fn static_files(req: HttpRequest) -> impl Responder {
             match req.path() {
                 "/styles.css" => NamedFile::open("./static/styles.css"),
-                "/index.js" => NamedFile::open("./static/index.js"),
-                "/game.js" => NamedFile::open("./static/game.js"),
                 "/" => NamedFile::open("./static/index.html"),
                 _ => NamedFile::open("./static/404.html"),
             }
         }
+        #[get("index.js")]
+        async fn javascript() -> impl Responder {
+            use std::io::Read;
+            use std::env;
+            let domain = env::var("ANALYTICS");
+            let extra_text = match domain {
+                Ok(domain) => format!("var _paq = window._paq = window._paq || [];
+_paq.push(['trackPageView']);
+_paq.push(['enableLinkTracking']);
+(function() {{
+    var u=`//{}/`;
+    _paq.push(['setTrackerUrl', u+'matomo.php']);
+    _paq.push(['setSiteId', '{}']);
+    var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+    g.async=true; g.src=u+'matomo.js'; s.parentNode.insertBefore(g,s);
+}})();", domain, env::var("ANALYTICS_ID").unwrap_or("1".to_string())),
+                Err(_) => "".to_string(),
+            };
+            let a = NamedFile::open("./static/index.js");
+            let mut a = a.expect("couldn't open index.js");
+            let mut buf = String::new();
+            let _ = a.read_to_string(&mut buf);
+            HttpResponse::Ok().body(format!("{}{}", extra_text, buf))
+        }
         #[get("/{game}/{player}")]
         async fn game_page(path: web::Path<(String, String)>) -> impl Responder {
+            use std::io::Read;
             let a = NamedFile::open("./static/game.html");
             let mut a = a.expect("couldn't open game.html");
             let mut buf = String::new();
@@ -118,6 +139,7 @@ cfg_if! {
                 .execute(&mut conn)
                 .await
                 .expect("couldn't insert game");
+            #[cfg(not(feature = "client"))]
             println!("Server: Game {} created", game_id);
             HttpResponse::Ok().body(format!("{}", game_id))
         }
@@ -179,19 +201,6 @@ cfg_if! {
             }
             HttpResponse::Ok().body(format!("{}", player_id))
         }
-        #[post("/events/{game}")]
-        async fn new_event(path: web::Path<(String,)>) -> impl Responder {
-            let game = path.into_inner().0;
-            let _ = GAME_EVENTS.send(&Event {
-                game,
-                player: None,
-                event: EventData {
-                    text: "test\n".to_string(),
-                    input: false,
-                },
-            }).await;
-            HttpResponse::Ok().body(format!("Hello world!"))
-        }
         // Used to start the web server
         #[actix_web::main]
         pub async fn main() -> std::io::Result<()> {
@@ -215,9 +224,9 @@ cfg_if! {
                 .run(&mut conn)
                 .await
                 .expect("could not run SQLx migrations");
-            println!("Server: Starting server on port 8080...");
+            println!("Server: Starting server on port 8080 you can open webui on http://localhost:8080...");
             HttpServer::new(|| {
-                App::new().service(events).service(new_event).service(join_game).service(new_game).service(send_input).service(game_page).service(static_files)
+                App::new().service(events).service(join_game).service(new_game).service(send_input).service(game_page).service(javascript).service(static_files)
             })
             .bind(("0.0.0.0", 8080))?
             .run()

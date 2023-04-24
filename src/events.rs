@@ -22,6 +22,7 @@ cfg_if! {
           let mut conn = db().await.expect("couldn't connect to DB");
           let mut events = GAME_EVENTS.clone();
           while let Some(event) = events.recv().await {
+            #[cfg(not(feature = "client"))]
             println!("Event fired: {:?}", event);
             match event.player {
               Some(player) => {

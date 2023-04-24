@@ -22,12 +22,17 @@ pub async fn main() {
     // Waits a second so if the server is enabled it shows the server message first
     #[cfg(feature = "server")]
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    let mut server = String::new();
-    println!("Enter the server address(ex:https://example.com): ");
-    io::stdin()
-        .read_line(&mut server)
-        .expect("Failed to read line");
-    let server = server.trim();
+    // Prefills the server address if the server feature is enabled
+    let server = if cfg!(feature = "server") {
+        "http://localhost:8080".to_owned()
+    } else {
+        let mut server = String::new();
+        println!("Enter the server address(ex:https://example.com): ");
+        io::stdin()
+            .read_line(&mut server)
+            .expect("Failed to read line");
+        server.trim().to_owned()
+    };
     let mut create = String::new();
     println!("Do you want to create a new game? (y/n): ");
     io::stdin()
