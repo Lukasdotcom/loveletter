@@ -271,237 +271,263 @@ cfg_if! {
                 // Gets the opponent data
                 let opponent = opponent.unwrap();
                 let mut finished = true;
-                match hand[card_picked.played_card as usize] {
-                    // The player picked the clown
-                    2 => {
-                        // Gets strings of the cards the opponent has
-                        let opponent_cards = serde_json::from_str::<Vec<i32>>(&opponent.hand)
-                            .expect("Invalid hand")
-                            .iter()
-                            .filter(|card| **card != 0)
-                            .map(|card| {
-                                format!(
-                                    "\n{} {} {}",
-                                    card, CARD_NAME[*card as usize], CARD_DESCRIPTIONS[*card as usize],
-                                )
-                            })
-                            .collect::<String>();
-                        let _ = GAME_EVENTS
-                            .send(&crate::events::Event {
-                                game: game_id.clone(),
-                                player: Some(player.turn),
-                                event: crate::events::EventData {
-                                    text: format!(
-                                        "Player {} called {} has card(s):{}\n",
-                                        opponent.turn, opponent.name, opponent_cards
-                                    ),
-                                    input: false,
-                                },
-                            })
-                            .await;
-                        let _ = GAME_EVENTS
-                            .send(&crate::events::Event {
-                                game: game_id.clone(),
-                                player: None,
-                                event: crate::events::EventData {
-                                    text: format!("Player {} called {} played the clown, and looked at player {} called {}\n", player.turn, player.name, opponent.turn, opponent.name),
-                                    input: false,
-                                },
-                            })
-                            .await;
-                    }
-                    // The player picked the knight
-                    3 => {
-                        let mut opponent_card = 0;
-                        for x in serde_json::from_str::<Vec<usize>>(&opponent.hand).expect("Invalid hand") {
-                            if x > opponent_card {
-                                opponent_card = x;
+                // Checks if the player picked is immune to attacks
+                if opponent.immune {
+                    let _ = GAME_EVENTS
+                        .send(&crate::events::Event {
+                            game: game_id.clone(),
+                            player: Some(player.turn),
+                            event: crate::events::EventData {
+                                text: format!(
+                                    "Player {} called {} tried to play card {} called {} on player {} called {}, but player {} is immune to attacks right now.\n",
+                                    player.turn, player.name, card_picked.played_card, CARD_NAME[card_picked.played_card as usize], player_picked, opponent.name, player_picked
+                                ),
+                                input: false,
+                            },
+                        })
+                        .await;
+                } else {
+                    match hand[card_picked.played_card as usize] {
+                        // The player picked the clown
+                        2 => {
+                            // Gets strings of the cards the opponent has
+                            let opponent_cards = serde_json::from_str::<Vec<i32>>(&opponent.hand)
+                                .expect("Invalid hand")
+                                .iter()
+                                .filter(|card| **card != 0)
+                                .map(|card| {
+                                    format!(
+                                        "\n{}-{}-{}",
+                                        card, CARD_NAME[*card as usize], CARD_DESCRIPTIONS[*card as usize],
+                                    )
+                                })
+                                .collect::<String>();
+                            let _ = GAME_EVENTS
+                                .send(&crate::events::Event {
+                                    game: game_id.clone(),
+                                    player: Some(player.turn),
+                                    event: crate::events::EventData {
+                                        text: format!(
+                                            "Player {} called {} has card(s):{}\n",
+                                            opponent.turn, opponent.name, opponent_cards
+                                        ),
+                                        input: false,
+                                    },
+                                })
+                                .await;
+                            let _ = GAME_EVENTS
+                                .send(&crate::events::Event {
+                                    game: game_id.clone(),
+                                    player: None,
+                                    event: crate::events::EventData {
+                                        text: format!("Player {} called {} played the clown, and looked at player {} called {}\n", player.turn, player.name, opponent.turn, opponent.name),
+                                        input: false,
+                                    },
+                                })
+                                .await;
+                        }
+                        // The player picked the knight
+                        3 => {
+                            let mut opponent_card = 0;
+                            for x in serde_json::from_str::<Vec<usize>>(&opponent.hand).expect("Invalid hand") {
+                                if x > opponent_card {
+                                    opponent_card = x;
+                                }
+                            }
+                            let mut played_card = 0;
+                            for x in hand.clone() {
+                                if x > played_card {
+                                    played_card = x;
+                                }
+                            }
+                            // Checks who won and eliminates the loser
+                            match played_card.cmp(&opponent_card) {
+                                Ordering::Less => {
+                                    let _ = GAME_EVENTS
+                                        .send(&crate::events::Event {
+                                            game: game_id.clone(),
+                                            player: None,
+                                            event: crate::events::EventData {
+                                                text: format!("Player {} called {} played a knight and lost against player {} called {}.\nPlayer {} had a {}-{}\n", player.turn, player.name, opponent.turn, opponent.name, player.turn, played_card, CARD_NAME[played_card as usize]),
+                                                input: false,
+                                            },
+                                        })
+                                        .await;
+                                    let _ =
+                                        sqlx::query("UPDATE players SET alive=0 WHERE game=? AND turn=?")
+                                            .bind(&game_id)
+                                            .bind(&player.turn)
+                                            .execute(&mut conn)
+                                            .await
+                                            .expect("couldn't update player");
+                                }
+                                Ordering::Equal => {
+                                    let _ = GAME_EVENTS
+                                        .send(&crate::events::Event {
+                                            game: game_id.clone(),
+                                            player: None,
+                                            event: crate::events::EventData {
+                                                text: format!("Player {} called {} played a knight and tied with player {} called {}.\n", player.turn, player.name, opponent.turn, opponent.name),
+                                                input: false,
+                                            },
+                                        })
+                                        .await;
+                                }
+                                Ordering::Greater => {
+                                    let _ = GAME_EVENTS
+                                        .send(&crate::events::Event {
+                                            game: game_id.clone(),
+                                            player: None,
+                                            event: crate::events::EventData {
+                                                text: format!("Player {} called {} played a knight and won against player {} called {}\nPlayer {} had a {}-{}\n", player.turn, player.name, opponent.turn, opponent.name, opponent.turn, opponent_card, CARD_NAME[opponent_card as usize]),
+                                                input: false,
+                                            },
+                                        })
+                                        .await;
+                                    let _ =
+                                        sqlx::query("UPDATE players SET alive=0 WHERE game=? AND turn=?")
+                                            .bind(&game_id)
+                                            .bind(&opponent.turn)
+                                            .execute(&mut conn)
+                                            .await
+                                            .expect("couldn't update player");
+                                }
                             }
                         }
-                        let mut played_card = 0;
-                        for x in hand {
-                            if x > played_card {
-                                played_card = x;
-                            }
+                        // The player picked the wizard
+                        5 => {
+                            let mut deck =
+                                serde_json::from_str::<Vec<usize>>(&game.deck).expect("Invalid deck");
+                            let opponent_hand: Vec<usize> = vec![deck.pop().unwrap(), 0];
+                            let _ = sqlx::query("UPDATE players SET hand=? WHERE game=? AND turn=?")
+                                .bind(&serde_json::to_string(&opponent_hand).unwrap())
+                                .bind(&game_id)
+                                .bind(&opponent.turn)
+                                .execute(&mut conn)
+                                .await
+                                .expect("couldn't update player");
+                            let _ = sqlx::query("UPDATE Games SET deck=? WHERE id=?")
+                                .bind(&serde_json::to_string(&deck).unwrap())
+                                .bind(&game_id)
+                                .execute(&mut conn)
+                                .await
+                                .expect("couldn't update game");
+                            let _ = GAME_EVENTS
+                                .send(&crate::events::Event {
+                                    game: game_id.clone(),
+                                    player: None,
+                                    event: crate::events::EventData {
+                                        text: format!("Player {} called {} played a wizard and caused player {} called {} to discard their hand\n", player.turn, player.name, opponent.turn, opponent.name),
+                                        input: false,
+                                    },
+                                })
+                                .await;
                         }
-                        // Checks who won and eliminates the loser
-                        match played_card.cmp(&opponent_card) {
-                            Ordering::Less => {
-                                let _ = GAME_EVENTS
-                                    .send(&crate::events::Event {
-                                        game: game_id.clone(),
-                                        player: None,
-                                        event: crate::events::EventData {
-                                            text: format!("Player {} called {} played a knight and lost against player {} called {}\n", player.turn, player.name, opponent.turn, opponent.name),
-                                            input: false,
-                                        },
-                                    })
-                                    .await;
-                                let _ =
-                                    sqlx::query("UPDATE players SET alive=0 WHERE game=? AND turn=?")
-                                        .bind(&game_id)
-                                        .bind(&player.turn)
-                                        .execute(&mut conn)
-                                        .await
-                                        .expect("couldn't update player");
-                            }
-                            Ordering::Equal => {
-                                let _ = GAME_EVENTS
-                                    .send(&crate::events::Event {
-                                        game: game_id.clone(),
-                                        player: None,
-                                        event: crate::events::EventData {
-                                            text: format!("Player {} called {} played a knight and tied with player {} called {}\n", player.turn, player.name, opponent.turn, opponent.name),
-                                            input: false,
-                                        },
-                                    })
-                                    .await;
-                            }
-                            Ordering::Greater => {
-                                let _ = GAME_EVENTS
-                                    .send(&crate::events::Event {
-                                        game: game_id.clone(),
-                                        player: None,
-                                        event: crate::events::EventData {
-                                            text: format!("Player {} called {} played a knight and won against player {} called {}\n", player.turn, player.name, opponent.turn, opponent.name),
-                                            input: false,
-                                        },
-                                    })
-                                    .await;
-                                let _ =
-                                    sqlx::query("UPDATE players SET alive=0 WHERE game=? AND turn=?")
-                                        .bind(&game_id)
-                                        .bind(&opponent.turn)
-                                        .execute(&mut conn)
-                                        .await
-                                        .expect("couldn't update player");
-                            }
+                        // The player picked the general
+                        6 => {
+                            let _ = sqlx::query("UPDATE Players SET hand=? WHERE game=? AND turn=?")
+                                .bind(&player.hand)
+                                .bind(&game_id)
+                                .bind(opponent.turn)
+                                .execute(&mut conn)
+                                .await
+                                .expect("coudn't update opponent");
+                            let _ = sqlx::query("UPDATE Players SET hand=? WHERE game=? AND turn=?")
+                                .bind(&opponent.hand)
+                                .bind(&game_id)
+                                .bind(player.turn)
+                                .execute(&mut conn)
+                                .await
+                                .expect("coudn't update player");
+                            let _ = GAME_EVENTS
+                                .send(&crate::events::Event {
+                                    game: game_id.clone(),
+                                    player: None,
+                                    event: crate::events::EventData {
+                                        text: format!("Player {} called {} played a general and caused player {} called {} to switch hands with them\n", player.turn, player.name, opponent.turn, opponent.name),
+                                        input: false,
+                                    },
+                                })
+                                .await;
+                            // Tells the 2 players the new cards they have
+                            let played_cards = serde_json::from_str::<Vec<i32>>(&opponent.hand)
+                                .expect("Invalid hand")
+                                .iter()
+                                .filter(|card| **card != 0)
+                                .map(|card| {
+                                    format!(
+                                        "\n{}-{}-{}",
+                                        card, CARD_NAME[*card as usize], CARD_DESCRIPTIONS[*card as usize],
+                                    )
+                                })
+                                .collect::<String>();
+                            let opponent_cards = serde_json::from_str::<Vec<i32>>(&player.hand)
+                                .expect("Invalid hand")
+                                .iter()
+                                .filter(|card| **card != 0)
+                                .map(|card| {
+                                    format!(
+                                        "\n{}-{}-{}",
+                                        card, CARD_NAME[*card as usize], CARD_DESCRIPTIONS[*card as usize],
+                                    )
+                                })
+                                .collect::<String>();
+                            let _ = GAME_EVENTS
+                                .send(&crate::events::Event {
+                                    game: game_id.clone(),
+                                    player: Some(player.turn),
+                                    event: crate::events::EventData {
+                                        text: format!("Your cards were switched and now are {}\n", played_cards),
+                                        input: false,
+                                    },
+                                })
+                                .await;
+                            let _ = GAME_EVENTS
+                                .send(&crate::events::Event {
+                                    game: game_id.clone(),
+                                    player: Some(opponent.turn),
+                                    event: crate::events::EventData {
+                                        text: format!(
+                                            "Your cards were switched and now are {}\n",
+                                            opponent_cards
+                                        ),
+                                        input: false,
+                                    },
+                                })
+                                .await;
                         }
-                    }
-                    // The player picked the wizard
-                    5 => {
-                        let mut deck =
-                            serde_json::from_str::<Vec<usize>>(&game.deck).expect("Invalid deck");
-                        let opponent_hand: Vec<usize> = vec![deck.pop().unwrap(), 0];
-                        let _ = sqlx::query("UPDATE players SET hand=? WHERE game=? AND turn=?")
-                            .bind(&serde_json::to_string(&opponent_hand).unwrap())
-                            .bind(&game_id)
-                            .bind(&opponent.turn)
-                            .execute(&mut conn)
-                            .await
-                            .expect("couldn't update player");
-                        let _ = sqlx::query("UPDATE Games SET deck=? WHERE id=?")
-                            .bind(&serde_json::to_string(&deck).unwrap())
-                            .bind(&game_id)
-                            .execute(&mut conn)
-                            .await
-                            .expect("couldn't update game");
-                        let _ = GAME_EVENTS
-                            .send(&crate::events::Event {
-                                game: game_id.clone(),
-                                player: None,
-                                event: crate::events::EventData {
-                                    text: format!("Player {} called {} played a wizard and caused player {} called {} to discard their hand\n", player.turn, player.name, opponent.turn, opponent.name),
-                                    input: false,
-                                },
-                            })
-                            .await;
-                    }
-                    // The player picked the general
-                    6 => {
-                        let _ = sqlx::query("UPDATE Players SET deck=? WHERE game=? AND turn=?")
-                            .bind(&player.hand)
-                            .bind(&game_id)
-                            .bind(opponent.turn)
-                            .execute(&mut conn)
-                            .await
-                            .expect("coudn't update opponent");
-                        let _ = sqlx::query("UPDATE Players SET deck=? WHERE game=? AND turn=?")
-                            .bind(&opponent.hand)
-                            .bind(&game_id)
-                            .bind(player.turn)
-                            .execute(&mut conn)
-                            .await
-                            .expect("coudn't update player");
-                        let _ = GAME_EVENTS
-                            .send(&crate::events::Event {
-                                game: game_id.clone(),
-                                player: None,
-                                event: crate::events::EventData {
-                                    text: format!("Player {} called {} played a general and caused player {} called {} to switch hands with them\n", player.turn, player.name, opponent.turn, opponent.name),
-                                    input: false,
-                                },
-                            })
-                            .await;
-                        // Tells the 2 players the new cards they have
-                        let played_cards = serde_json::from_str::<Vec<i32>>(&opponent.hand)
-                            .expect("Invalid hand")
-                            .iter()
-                            .filter(|card| **card != 0)
-                            .map(|card| {
-                                format!(
-                                    "\n{} {} {}",
-                                    card, CARD_NAME[*card as usize], CARD_DESCRIPTIONS[*card as usize],
-                                )
-                            })
-                            .collect::<String>();
-                        let opponent_cards = serde_json::from_str::<Vec<i32>>(&player.hand)
-                            .expect("Invalid hand")
-                            .iter()
-                            .filter(|card| **card != 0)
-                            .map(|card| {
-                                format!(
-                                    "\n{} {} {}",
-                                    card, CARD_NAME[*card as usize], CARD_DESCRIPTIONS[*card as usize],
-                                )
-                            })
-                            .collect::<String>();
-                        let _ = GAME_EVENTS
-                            .send(&crate::events::Event {
-                                game: game_id.clone(),
-                                player: Some(player.turn),
-                                event: crate::events::EventData {
-                                    text: format!("Your cards were switched and now are {}\n", played_cards),
-                                    input: false,
-                                },
-                            })
-                            .await;
-                        let _ = GAME_EVENTS
-                            .send(&crate::events::Event {
-                                game: game_id.clone(),
-                                player: Some(opponent.turn),
-                                event: crate::events::EventData {
-                                    text: format!(
-                                        "Your cards were switched and now are {}\n",
-                                        opponent_cards
-                                    ),
-                                    input: false,
-                                },
-                            })
-                            .await;
-                    }
-                    // For the soldier lets the player pick a guess
-                    _ => {
-                        let _ = sqlx::query("UPDATE Games SET player_pick=? WHERE id=?")
-                            .bind(player_picked as i32)
-                            .bind(&game_id)
-                            .execute(&mut conn)
-                            .await
-                            .expect("failed to save target");
-                        let _ = GAME_EVENTS
-                            .send(&crate::events::Event {
-                                game: game_id.clone(),
-                                player: Some(player.turn),
-                                event: crate::events::EventData {
-                                    text: format!("Pick the card number you want to guess:\n"),
-                                    input: true,
-                                },
-                            })
-                            .await;
-                        finished = false;
+                        // For the soldier lets the player pick a guess
+                        _ => {
+                            let _ = sqlx::query("UPDATE Games SET player_pick=? WHERE id=?")
+                                .bind(player_picked as i32)
+                                .bind(&game_id)
+                                .execute(&mut conn)
+                                .await
+                                .expect("failed to save target");
+                            let _ = GAME_EVENTS
+                                .send(&crate::events::Event {
+                                    game: game_id.clone(),
+                                    player: Some(player.turn),
+                                    event: crate::events::EventData {
+                                        text: format!("Pick the card number you want to guess:\n"),
+                                        input: true,
+                                    },
+                                })
+                                .await;
+                            finished = false;
+                        }
                     }
                 }
                 if finished {
+                    let mut hand2 = hand;
+                    hand2[card_picked.played_card as usize] = 0;
+                    let _ = sqlx::query("UPDATE players SET hand=? WHERE game=? AND turn=?")
+                        .bind(serde_json::to_string(&hand2).expect("Invalid hand"))
+                        .bind(&game_id)
+                        .bind(&player.turn)
+                        .execute(&mut conn)
+                        .await
+                        .expect("couldn't update player");
                     run_turn(game_id).await;
                 }
             // Used to run the guess for the soldier
@@ -634,7 +660,7 @@ cfg_if! {
                     .fetch_all(&mut conn)
                     .await
                     .expect("couldn't get players");
-            let _ = sqlx::query("UPDATE Games SET player_pick=0, player_card=0  WHERE id=?")
+            let _ = sqlx::query("UPDATE Games SET player_pick=-1, played_card=-1  WHERE id=?")
                 .bind(&id)
                 .execute(&mut conn)
                 .await
@@ -746,7 +772,7 @@ cfg_if! {
                     player: Some(player.turn),
                     event: crate::events::EventData {
                         text: format!(
-                            "Your hand is:\n1. {} {} {}\n2. {} {} {}\nDo you want to play card 1 or 2:\n",
+                            "Your hand is:\n1. {}-{}-{}\n2. {}-{}-{}\nDo you want to play card 1 or 2:\n",
                             card1,
                             CARD_NAME[card1],
                             CARD_DESCRIPTIONS[card1],

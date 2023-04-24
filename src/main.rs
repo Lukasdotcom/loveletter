@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use cfg_if::cfg_if;
 cfg_if! {
     if #[cfg(feature = "server")] {
@@ -5,6 +7,26 @@ cfg_if! {
         use serde::Deserialize;
         use loveletter::{db, game, events::{Event, EventData, GAME_EVENTS}};
         use actix_web::*;
+        use actix_files::*;
+        #[get("{filename:.*}")]
+        async fn static_files(req: HttpRequest) -> impl Responder {
+            match req.path() {
+                "/styles.css" => NamedFile::open("./static/styles.css"),
+                "/index.js" => NamedFile::open("./static/index.js"),
+                "/game.js" => NamedFile::open("./static/game.js"),
+                "/" => NamedFile::open("./static/index.html"),
+                _ => NamedFile::open("./static/404.html"),
+            }
+        }
+        #[get("/{game}/{player}")]
+        async fn game_page(path: web::Path<(String, String)>) -> impl Responder {
+            let a = NamedFile::open("./static/game.html");
+            let mut a = a.expect("couldn't open game.html");
+            let mut buf = String::new();
+            let _ = a.read_to_string(&mut buf);
+            let json = serde_json::to_string(&path.into_inner()).expect("couldn't serialize path");
+            HttpResponse::Ok().body(format!("<script>const path_vars=JSON.parse(`{}`)</script>{}", json, buf))
+        }
         /*
         Title: Leptos Counter Isomorphic Example
         Author:  Greg Johnston
@@ -24,8 +46,11 @@ cfg_if! {
                     .bind(&game)
                     .bind(player)
                     .fetch_one(&mut conn)
-                    .await
-                    .expect("couldn't get player");
+                    .await;
+            if player.is_err() {
+                return HttpResponse::BadRequest().body("Invalid player");
+            }
+            let player = player.unwrap();
             let turn = player.turn;
             let text = player.text;
             let input = player.input;
@@ -192,7 +217,7 @@ cfg_if! {
                 .expect("could not run SQLx migrations");
             println!("Server: Starting server on port 8080...");
             HttpServer::new(|| {
-                App::new().service(events).service(new_event).service(join_game).service(new_game).service(send_input)
+                App::new().service(events).service(new_event).service(join_game).service(new_game).service(send_input).service(game_page).service(static_files)
             })
             .bind(("0.0.0.0", 8080))?
             .run()
