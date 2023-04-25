@@ -31,3 +31,11 @@ button:hover {
   width: 95%;
   overflow: scroll;
 }
+input {
+  background-color: #333;
+  border: 1px solid #555;
+  color: white;
+}
+a {
+  color: #44f;
+}
