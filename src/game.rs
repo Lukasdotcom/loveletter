@@ -66,6 +66,12 @@ cfg_if! {
                     deck.push(i);
                 }
             }
+            /*
+            Title: How do I create a Vec from a range and shuffle it?
+            Author:  Vladimir Matveev
+            Date: Sep 25 2014
+            Availability: https://stackoverflow.com/questions/26033976/how-do-i-create-a-vec-from-a-range-and-shuffle-it
+            */
             deck.shuffle(&mut rand::thread_rng());
             deck
         }
@@ -271,6 +277,7 @@ cfg_if! {
                 // Gets the opponent data
                 let opponent = opponent.unwrap();
                 let mut finished = true;
+                let mut discarded_card = false;
                 // Checks if the player picked is immune to attacks
                 if opponent.immune {
                     let _ = GAME_EVENTS
@@ -328,6 +335,16 @@ cfg_if! {
                         }
                         // The player picked the knight
                         3 => {
+                            discarded_card = true;
+                            let mut hand = hand.clone();
+                            hand[card_picked.played_card as usize] = 0;
+                            let _ = sqlx::query("UPDATE players SET hand=? WHERE game=? AND turn=?")
+                                .bind(serde_json::to_string(&hand).expect("Invalid hand"))
+                                .bind(&game_id)
+                                .bind(&player.turn)
+                                .execute(&mut conn)
+                                .await
+                                .expect("couldn't update player");
                             let mut opponent_card = 0;
                             for x in serde_json::from_str::<Vec<usize>>(&opponent.hand).expect("Invalid hand") {
                                 if x > opponent_card {
@@ -335,7 +352,7 @@ cfg_if! {
                                 }
                             }
                             let mut played_card = 0;
-                            for x in hand.clone() {
+                            for x in hand {
                                 if x > played_card {
                                     played_card = x;
                                 }
@@ -425,8 +442,19 @@ cfg_if! {
                         }
                         // The player picked the general
                         6 => {
+                            discarded_card = true;
+                            let mut hand = hand.clone();
+                            hand[card_picked.played_card as usize] = 0;
+                            let hand_text = serde_json::to_string(&hand).expect("Invalid hand");
+                            let _ = sqlx::query("UPDATE players SET hand=? WHERE game=? AND turn=?")
+                                .bind(&hand_text)
+                                .bind(&game_id)
+                                .bind(&player.turn)
+                                .execute(&mut conn)
+                                .await
+                                .expect("couldn't update player");
                             let _ = sqlx::query("UPDATE Players SET hand=? WHERE game=? AND turn=?")
-                                .bind(&player.hand)
+                                .bind(&hand_text)
                                 .bind(&game_id)
                                 .bind(opponent.turn)
                                 .execute(&mut conn)
@@ -461,8 +489,7 @@ cfg_if! {
                                     )
                                 })
                                 .collect::<String>();
-                            let opponent_cards = serde_json::from_str::<Vec<i32>>(&player.hand)
-                                .expect("Invalid hand")
+                            let opponent_cards = hand
                                 .iter()
                                 .filter(|card| **card != 0)
                                 .map(|card| {
@@ -519,15 +546,18 @@ cfg_if! {
                     }
                 }
                 if finished {
-                    let mut hand2 = hand;
-                    hand2[card_picked.played_card as usize] = 0;
-                    let _ = sqlx::query("UPDATE players SET hand=? WHERE game=? AND turn=?")
-                        .bind(serde_json::to_string(&hand2).expect("Invalid hand"))
-                        .bind(&game_id)
-                        .bind(&player.turn)
-                        .execute(&mut conn)
-                        .await
-                        .expect("couldn't update player");
+                    if !discarded_card {
+                        let mut hand2 = hand;
+                        hand2[card_picked.played_card as usize] = 0;
+                        let _ = sqlx::query("UPDATE players SET hand=? WHERE game=? AND turn=?")
+                            .bind(serde_json::to_string(&hand2).expect("Invalid hand"))
+                            .bind(&game_id)
+                            .bind(&player.turn)
+                            .execute(&mut conn)
+                            .await
+                            .expect("couldn't update player");
+                    }
+                    
                     run_turn(game_id).await;
                 }
             // Used to run the guess for the soldier
@@ -611,7 +641,7 @@ cfg_if! {
             }
             Ok(())
         }
-        // Skips turns until the player is not eliminated
+        // Skips turns until you get to a player that is not eliminated
         pub async fn continue_turns(id: &str) {
             let mut conn = crate::db::db().await.expect("couldn't connect to DB");
             loop {
