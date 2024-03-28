@@ -25,7 +25,7 @@ sqlx = { version = "0.6.3", features = [
 	"sqlite",
 	"migrate",
 ], optional = true }
-tokio = {version = "1.28.0", features = ["macros", "rt-multi-thread"] }
+tokio = {version = "1.37.0", features = ["macros", "rt-multi-thread"] }
 
 [features]
 default = ["client"]
